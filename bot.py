@@ -8,8 +8,8 @@ from solana.rpc.api import Client as SolanaClient
 from solana.publickey import PublicKey
 
 # Load Environment Variables
-HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")  # Nama Aplikasi Heroku
-HEROKU_API_KEY = os.getenv("HEROKU_API_KEY")  # API Key Heroku
+HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")
+HEROKU_API_KEY = os.getenv("HEROKU_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Load RPC URLs dari File JSON
@@ -17,14 +17,10 @@ with open("rpc_config.json", "r") as f:
     RPC_URLS = json.load(f)
 
 # Initialize Web3 clients untuk jaringan EVM
-web3_clients = {chain: Web3(Web3.HTTPProvider(url)) for chain, url in RPC_URLS.items() if chain != "solana"}
+web3_clients = {chain: Web3(Web3.HTTPProvider(url)) for chain, url in RPC_URLS.items() if chain != "solana" and chain != "ton"}
 
 # Initialize Solana client
 solana_client = SolanaClient(RPC_URLS.get("solana"))
-
-# Initialize Telegram Bot
-updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
 
 def update_heroku_config(key, value):
     """Update Config Vars di Heroku menggunakan API"""
@@ -36,7 +32,6 @@ def update_heroku_config(key, value):
     }
     data = {key: value}
     response = requests.patch(url, headers=headers, json=data)
-    
     return response.status_code == 200
 
 def add_address(update: Update, context: CallbackContext):
@@ -48,27 +43,26 @@ def add_address(update: Update, context: CallbackContext):
     network, address = context.args
     network = network.lower()
 
-    if network in RPC_URLS:
-        key = f"TRACKED_{network.upper()}_ADDRESS"
-        network_name = network.upper()
+    if network in web3_clients:
+        key = "TRACKED_EVM_ADDRESSES"
+        network_name = "EVM Chains"
     elif network == "solana":
-        key = "TRACKED_SOLANA_ADDRESS"
+        key = "TRACKED_SOLANA_ADDRESSES"
         network_name = "Solana"
     elif network == "ton":
-        key = "TRACKED_TON_ADDRESS"
+        key = "TRACKED_TON_ADDRESSES"
         network_name = "TON"
     else:
         update.message.reply_text("Invalid network! Use: eth/bsc/polygon/base/op/morph/solana/ton")
         return
 
-    # Ambil address lama, tambahkan address baru, lalu update ke Heroku
     old_addresses = os.getenv(key, "").split(",")
     if address in old_addresses:
         update.message.reply_text(f"⚠️ Address {address} sudah ditambahkan sebelumnya!")
         return
 
     new_addresses = ",".join(filter(None, old_addresses + [address]))
-
+    
     if update_heroku_config(key, new_addresses):
         update.message.reply_text(f"✅ Address {address} berhasil ditambahkan ke {network_name}")
     else:
@@ -84,7 +78,7 @@ def check_balance(update: Update, context: CallbackContext):
     network = network.lower()
 
     if network in web3_clients:
-        web3 = web3_clients.get(network)
+        web3 = web3_clients[network]
         try:
             balance_wei = web3.eth.get_balance(address)
             balance_eth = web3.from_wei(balance_wei, 'ether')
@@ -101,15 +95,22 @@ def check_balance(update: Update, context: CallbackContext):
     elif network == "ton":
         try:
             response = requests.get(f"https://tonapi.io/v1/account/getInfo?account={address}")
-            data = response.json()
-            balance = data['balance'] / 1e9
-            message = f"💰 Saldo TON: {balance:.4f} TON"
+            if response.status_code == 200:
+                data = response.json()
+                balance = data.get('balance', 0) / 1e9
+                message = f"💰 Saldo TON: {balance:.4f} TON"
+            else:
+                message = "⚠️ Gagal mengambil saldo TON: API tidak merespons dengan benar."
         except Exception as e:
             message = f"⚠️ Gagal mengambil saldo TON: {str(e)}"
     else:
         message = "❌ Jaringan tidak dikenali! Gunakan: eth/bsc/polygon/base/op/morph/solana/ton"
 
     update.message.reply_text(message)
+
+# Initialize Telegram Bot
+updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+dispatcher = updater.dispatcher
 
 # Register Telegram Commands
 dispatcher.add_handler(CommandHandler("addaddress", add_address))
