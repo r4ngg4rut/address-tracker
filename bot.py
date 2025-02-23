@@ -5,6 +5,7 @@ from web3 import Web3
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from solana.rpc.api import Client as SolanaClient
+from solana.publickey import PublicKey
 
 # Load Environment Variables
 HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")  # Nama Aplikasi Heroku
@@ -92,7 +93,8 @@ def check_balance(update: Update, context: CallbackContext):
             message = f"⚠️ Gagal mengambil saldo {network.upper()}: {str(e)}"
     elif network == "solana":
         try:
-            balance = solana_client.get_balance(address)['result']['value'] / 1e9
+            pubkey = PublicKey(address)
+            balance = solana_client.get_balance(pubkey)['result']['value'] / 1e9
             message = f"💰 Saldo SOLANA: {balance:.4f} SOL"
         except Exception as e:
             message = f"⚠️ Gagal mengambil saldo SOLANA: {str(e)}"
