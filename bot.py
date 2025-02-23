@@ -17,10 +17,14 @@ with open("rpc_config.json", "r") as f:
     RPC_URLS = json.load(f)
 
 # Initialize Web3 clients untuk jaringan EVM
-web3_clients = {chain: Web3(Web3.HTTPProvider(url)) for chain, url in RPC_URLS.items() if chain != "solana" and chain != "ton"}
+web3_clients = {chain: Web3(Web3.HTTPProvider(url)) for chain, url in RPC_URLS.items() if chain != "solana"}
 
 # Initialize Solana client
 solana_client = SolanaClient(RPC_URLS.get("solana"))
+
+# Initialize Telegram Bot
+updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+dispatcher = updater.dispatcher
 
 def update_heroku_config(key, value):
     """Update Config Vars di Heroku menggunakan API"""
@@ -42,18 +46,18 @@ def add_address(update: Update, context: CallbackContext):
 
     network, address = context.args
     network = network.lower()
-
-    if network in web3_clients:
-        key = "TRACKED_EVM_ADDRESSES"
-        network_name = "EVM Chains"
+    
+    if network == "evm":
+        key = "TRACKED_EVM_ADDRESS"
+        network_name = "EVM (ETH, BSC, Polygon, dll.)"
     elif network == "solana":
-        key = "TRACKED_SOLANA_ADDRESSES"
+        key = "TRACKED_SOLANA_ADDRESS"
         network_name = "Solana"
     elif network == "ton":
-        key = "TRACKED_TON_ADDRESSES"
+        key = "TRACKED_TON_ADDRESS"
         network_name = "TON"
     else:
-        update.message.reply_text("Invalid network! Use: eth/bsc/polygon/base/op/morph/solana/ton")
+        update.message.reply_text("Invalid network! Use: evm/solana/ton")
         return
 
     old_addresses = os.getenv(key, "").split(",")
@@ -76,15 +80,17 @@ def check_balance(update: Update, context: CallbackContext):
 
     network, address = context.args
     network = network.lower()
-
-    if network in web3_clients:
-        web3 = web3_clients[network]
-        try:
-            balance_wei = web3.eth.get_balance(address)
-            balance_eth = web3.from_wei(balance_wei, 'ether')
-            message = f"💰 Saldo {network.upper()}: {balance_eth:.4f} {network.upper()}"
-        except Exception as e:
-            message = f"⚠️ Gagal mengambil saldo {network.upper()}: {str(e)}"
+    
+    if network == "evm":
+        messages = []
+        for chain, web3 in web3_clients.items():
+            try:
+                balance_wei = web3.eth.get_balance(address)
+                balance_eth = web3.from_wei(balance_wei, 'ether')
+                messages.append(f"💰 {chain.upper()}: {balance_eth:.4f}")
+            except Exception as e:
+                messages.append(f"⚠️ {chain.upper()} error: {str(e)}")
+        message = "\n".join(messages)
     elif network == "solana":
         try:
             pubkey = PublicKey(address)
@@ -95,22 +101,15 @@ def check_balance(update: Update, context: CallbackContext):
     elif network == "ton":
         try:
             response = requests.get(f"https://tonapi.io/v1/account/getInfo?account={address}")
-            if response.status_code == 200:
-                data = response.json()
-                balance = data.get('balance', 0) / 1e9
-                message = f"💰 Saldo TON: {balance:.4f} TON"
-            else:
-                message = "⚠️ Gagal mengambil saldo TON: API tidak merespons dengan benar."
+            data = response.json()
+            balance = data.get('balance', 0) / 1e9
+            message = f"💰 Saldo TON: {balance:.4f} TON"
         except Exception as e:
             message = f"⚠️ Gagal mengambil saldo TON: {str(e)}"
     else:
-        message = "❌ Jaringan tidak dikenali! Gunakan: eth/bsc/polygon/base/op/morph/solana/ton"
+        message = "❌ Jaringan tidak dikenali! Gunakan: evm/solana/ton"
 
     update.message.reply_text(message)
-
-# Initialize Telegram Bot
-updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
 
 # Register Telegram Commands
 dispatcher.add_handler(CommandHandler("addaddress", add_address))
