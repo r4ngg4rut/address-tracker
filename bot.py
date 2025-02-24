@@ -3,10 +3,12 @@ import json
 import time
 import requests
 from web3 import Web3
+from web3.middleware import geth_poa_middleware
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from solana.rpc.api import Client as SolanaClient
 from solana.publickey import PublicKey
+import threading
 
 # Load Environment Variables
 HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")
@@ -18,8 +20,26 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 with open("rpc_config.json", "r") as f:
     RPC_URLS = json.load(f)
 
+# Daftar jaringan yang menggunakan Proof of Authority (PoA)
+POA_CHAINS = ["linea", "palm", "avax", "scroll", "celo"]
+
 # Initialize Web3 clients untuk jaringan EVM
-web3_clients = {chain: Web3(Web3.HTTPProvider(url)) for chain, url in RPC_URLS.items() if chain != "solana"}
+web3_clients = {}
+for chain, url in RPC_URLS.items():
+    if chain != "solana":
+        try:
+            web3 = Web3(Web3.HTTPProvider(url))
+
+            # Tambahkan middleware PoA jika jaringan termasuk PoA
+            if chain in POA_CHAINS:
+                web3.middleware_onion.inject(geth_poa_middleware, layer=0)
+
+            if web3.is_connected():
+                web3_clients[chain] = web3
+            else:
+                print(f"⚠️ Gagal terhubung ke RPC {chain}")
+        except Exception as e:
+            print(f"❌ Error inisialisasi Web3 untuk {chain}: {str(e)}")
 
 # Initialize Solana client
 solana_client = SolanaClient(RPC_URLS.get("solana"))
@@ -137,19 +157,18 @@ def monitor_transactions():
             except Exception as e:
                 print(f"⚠️ Error monitoring {chain}: {str(e)}")
 
-        time.sleep(1)
+        time.sleep(5)  # Optimasi agar tidak overload
 
 # Register Telegram Commands
 dispatcher.add_handler(CommandHandler("addaddress", add_address))
 dispatcher.add_handler(CommandHandler("balance", check_balance))
 
 if __name__ == "__main__":
-    print("�� Bot is running...")
-    
+    print("🚀 Bot is running...")
+
     # Jalankan pemantauan transaksi dalam thread terpisah
-    import threading
     t = threading.Thread(target=monitor_transactions)
     t.daemon = True
     t.start()
-    
+
     updater.start_polling()
