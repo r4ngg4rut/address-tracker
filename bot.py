@@ -21,7 +21,7 @@ with open("rpc_config.json", "r") as f:
     RPC_URLS = json.load(f)
 
 # Daftar jaringan yang menggunakan Proof of Authority (PoA)
-POA_CHAINS = ["linea", "palm", "avax", "scroll", "celo"]
+POA_CHAINS = ["linea", "palm", "avax", "scroll", "celo", "bsc", "polygon", "kcc", "metis", "core"]
 
 # Initialize Web3 clients untuk jaringan EVM
 web3_clients = {}
