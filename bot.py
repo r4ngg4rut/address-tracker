@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from web3 import Web3
 from telegram import Update
@@ -11,6 +12,7 @@ from solana.publickey import PublicKey
 HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")
 HEROKU_API_KEY = os.getenv("HEROKU_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Load RPC URLs dari File JSON
 with open("rpc_config.json", "r") as f:
@@ -25,6 +27,12 @@ solana_client = SolanaClient(RPC_URLS.get("solana"))
 # Initialize Telegram Bot
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
+
+def send_telegram_message(message):
+    """Kirim notifikasi ke Telegram"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    data = {"chat_id": CHAT_ID, "text": message}
+    requests.post(url, data=data)
 
 def update_heroku_config(key, value):
     """Update Config Vars di Heroku menggunakan API"""
@@ -111,11 +119,37 @@ def check_balance(update: Update, context: CallbackContext):
 
     update.message.reply_text(message)
 
+def monitor_transactions():
+    """Pantau transaksi masuk dan keluar"""
+    tracked_addresses = os.getenv("TRACKED_EVM_ADDRESS", "").split(",")
+
+    while True:
+        for chain, web3 in web3_clients.items():
+            try:
+                latest_block = web3.eth.block_number
+                block = web3.eth.get_block(latest_block, full_transactions=True)
+
+                for tx in block.transactions:
+                    if tx.to and tx.to.lower() in tracked_addresses:
+                        send_telegram_message(f"📥 Incoming Transaction\n🔹 Network: {chain.upper()}\n🔹 To: {tx.to}\n🔹 Amount: {web3.from_wei(tx.value, 'ether')} ETH")
+                    elif tx["from"].lower() in tracked_addresses:
+                        send_telegram_message(f"📤 Outgoing Transaction\n🔹 Network: {chain.upper()}\n🔹 From: {tx['from']}\n🔹 Amount: {web3.from_wei(tx.value, 'ether')} ETH")
+            except Exception as e:
+                print(f"⚠️ Error monitoring {chain}: {str(e)}")
+
+        time.sleep(1)
+
 # Register Telegram Commands
 dispatcher.add_handler(CommandHandler("addaddress", add_address))
 dispatcher.add_handler(CommandHandler("balance", check_balance))
 
-# Start the bot
 if __name__ == "__main__":
-    print("🚀 Bot is running...")
+    print("�� Bot is running...")
+    
+    # Jalankan pemantauan transaksi dalam thread terpisah
+    import threading
+    t = threading.Thread(target=monitor_transactions)
+    t.daemon = True
+    t.start()
+    
     updater.start_polling()
